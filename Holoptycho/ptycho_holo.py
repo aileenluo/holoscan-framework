@@ -119,7 +119,7 @@ class PtychoRecon(Operator):
         self.num_points_min = 300
         self.it = 0
         self.it_last_update = np.inf
-        self.it_ends_after = 10
+        self.it_ends_after = 30
         self.pos_ready_num = 0
         self.frame_ready_num = 0
         self.points_total = 0
@@ -195,13 +195,13 @@ class PtychoRecon(Operator):
         ready_num = np.minimum(self.recon.num_points_l,ready_num)
 
         if ready_num > self.recon.num_points_recon and self.num_points_min < np.inf:
+            if np.ceil(self.recon.x_range_um*1e-6/self.recon.x_pixel_m)*np.ceil(self.recon.y_range_um*1e-6/self.recon.x_pixel_m)/self.points_total > 16:
+                self.recon.clear_obj_tail(self.recon.num_points_recon,ready_num)
             self.recon.num_points_recon = ready_num
             if ready_num > np.minimum(self.recon.num_points_l,self.points_total)*0.97:
                 self.it_last_update = self.it
         
         if self.recon.num_points_recon > self.num_points_min:
-            # Maybe not?
-            # self.recon.live_update_plan_last()
             if not self.probe_initialized:
                 self.recon.init_live_prb(self.recon.num_points_recon)
                 if self.recon.prb_prop_dist_um != 0:
@@ -214,7 +214,7 @@ class PtychoRecon(Operator):
 
             if self.it % 10 == 0:
                 it_mmap = self.it % self.recon.n_iterations
-                op_output.emit((self.recon.mmap_prb[it_mmap],self.recon.mmap_obj[it_mmap],self.it),"save_live_result")
+                op_output.emit((self.recon.mmap_prb[it_mmap],self.recon.mmap_obj[it_mmap],self.it,self.recon.scan_num),"save_live_result")
 
             self.it += 1
 
@@ -240,6 +240,7 @@ def SaveLiveResult(results):
         np.save('/data/users/Holoscan/obj_live.npy',results[1])
         with open('/data/users/Holoscan/iteration','w') as f:
             f.write('%d\n'%results[2])
+        scan_num = results[3] # For future use
     except:
         pass
 
@@ -310,7 +311,7 @@ class PtychoApp(Application):
         
 
         self.batchsize = 64
-        self.min_points = 300
+        self.min_points = 256
 
         self.flip_image = True #According to detector settings
 
@@ -386,10 +387,13 @@ def main():
         config_path = sys.argv[1]
     #config = parse_args()
 
-    app = PtychoApp(config_path=config_path)
-    cp.cuda.Device(app.gpu).use()
-    cuda.select_device(app.gpu)
+    param = parse_config(config_path)
+    gpu = param.gpus[0]
+    cp.cuda.Device(gpu).use()
+    cuda.select_device(gpu)
     cp.cuda.set_pinned_memory_allocator()
+
+    app = PtychoApp(config_path=config_path)
     
     #app.config()
     
