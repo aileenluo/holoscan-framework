@@ -194,6 +194,10 @@ class PtychoRecon(Operator):
 
         ready_num = np.minimum(self.recon.num_points_l,ready_num)
 
+        cp.cuda.Device(self.recon.gpu).use()
+        cuda.select_device(self.recon.gpu)
+        # cp.cuda.set_pinned_memory_allocator()
+
         if ready_num > self.recon.num_points_recon and self.num_points_min < np.inf:
             if np.ceil(self.recon.x_range_um*1e-6/self.recon.x_pixel_m)*np.ceil(self.recon.y_range_um*1e-6/self.recon.x_pixel_m)/self.points_total > 16:
                 self.recon.clear_obj_tail(self.recon.num_points_recon,ready_num)
