@@ -1,4 +1,9 @@
 #!/bin/bash
+if [ $# == 0 ]; then
+	ARG="shell"
+else
+	ARG="$*"
+fi
 podman run --rm --net host -it \
 --shm-size=32g \
 -v ./podman_dir:/podman_dir \
@@ -8,7 +13,7 @@ podman run --rm --net host -it \
 -v /nsls2/data/hxn/legacy:/nsls2/data/hxn/legacy \
 -v /nsls2/data/hxn/legacy:/data \
 -v /nsls2/data/hxn/legacy/home/xf03id/src/hxntools:/hxntools \
--v ~/.ptycho_gui/root_home:/root \
+-v $HOME/.ptycho_gui/root_home:/root \
 -w /podman_dir \
 -e DISPLAY="$DISPLAY" \
 -e OMPI_ALLOW_RUN_AS_ROOT=1 \
@@ -17,4 +22,4 @@ podman run --rm --net host -it \
 -e OMPI_COMM_WORLD_LOCAL_SIZE=1 \
 -e HOLOSCAN_ENABLE_PROFILE=1 \
 --device nvidia.com/gpu=all \
-hxn-ptycho-holoscan pixi shell $@
+hxn-ptycho-holoscan pixi $ARG

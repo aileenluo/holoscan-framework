@@ -1,0 +1,2 @@
+#!/bin/bash
+./run_container run ./run_ptycho.sh
