@@ -23,6 +23,7 @@ from ..ptycho.recon_ptycho_gui import recon_thread
 # from nsls2ptycho.core.ptycho_param import Param
 
 from holoscan.core import Application, Operator, OperatorSpec, ConditionType, IOSpec
+from holoscan.operators import InferenceOp
 from holoscan.schedulers import GreedyScheduler, MultiThreadScheduler, EventBasedScheduler
 from holoscan.logger import LogLevel, set_log_level
 from holoscan.decorator import create_op
@@ -31,7 +32,7 @@ from .datasource import parse_args, EigerZmqRxOp, PositionRxOp, EigerDecompressO
 from .preprocess import ImageBatchOp, ImagePreprocessorOp, PointProcessorOp, ImageSendOp
 from .liverecon_utils import parse_scan_header
 from .live_simulation import InitSimul
-from .vit_inference import PtychoViTInferenceOp, SaveViTResult
+from .vit_inference import VitPreprocessOp, VitSaveOp
 
 class InitRecon(Operator):
     def __init__(self, *args, param, batchsize,min_points,scan_header_file, **kwargs):
@@ -328,14 +329,24 @@ class PtychoSimulApp(Application):
 
         # --- PtychoViT inference (parallel to iterative recon) ---
         # Simulate diffamp path: data is unshifted (DC at corners) — no undo needed
-        self.vit = PtychoViTInferenceOp(
+        self.vit_pre = VitPreprocessOp(
             self,
-            engine_path="/models/ptycho_vit_amp_phase_b64.engine",
-            gpu=1,
             data_is_shifted=False,
-            name="vit_inference",
+            name="vit_pre",
         )
-        self.vit_save = SaveViTResult(self, name="vit_save")
+        self.vit_infer = InferenceOp(
+            self,
+            backend="trt",
+            model_path_map={"ptychvit": "/models/ptycho_vit_amp_phase_b64.engine"},
+            pre_processor_map={"ptychvit": ["input"]},
+            inference_map={"ptychvit": ["output"]},
+            device_map={"ptychvit": "1"},
+            is_engine_path=True,
+            input_on_cuda=False,
+            output_on_cuda=False,
+            name="vit_infer",
+        )
+        self.vit_save = VitSaveOp(self, name="vit_save")
 
         self.add_flow(self.init,self.image_send,{("flush_image_send","flush"),("diff_amp","diff_amp"),("image_indices","image_indices")})
 
@@ -352,8 +363,10 @@ class PtychoSimulApp(Application):
         self.add_flow(self.pty,self.o,{("output","output")})
 
         # VIT: branch off InitSimul's diff_amp (fan-out, parallel to image_send)
-        self.add_flow(self.init, self.vit, {("diff_amp", "diff_amp"), ("image_indices", "image_indices")})
-        self.add_flow(self.vit, self.vit_save, {("vit_result", "results")})
+        self.add_flow(self.init, self.vit_pre, {("diff_amp", "diff_amp"), ("image_indices", "image_indices")})
+        self.add_flow(self.vit_pre,  self.vit_infer, {("preprocessed", "receivers")})
+        self.add_flow(self.vit_pre,  self.vit_save,  {("metadata", "metadata")})
+        self.add_flow(self.vit_infer, self.vit_save, {("transmitter", "infer_output")})
 
 
 class PtychoApp(Application):
@@ -440,14 +453,24 @@ class PtychoApp(Application):
 
         # --- PtychoViT inference (parallel to iterative recon) ---
         # Live mode: ImagePreprocessorOp applies fftshift — undo it for model
-        self.vit = PtychoViTInferenceOp(
+        self.vit_pre = VitPreprocessOp(
             self,
-            engine_path="/models/ptycho_vit_amp_phase_b64.engine",
-            gpu=1,
             data_is_shifted=True,
-            name="vit_inference",
+            name="vit_pre",
         )
-        self.vit_save = SaveViTResult(self, name="vit_save")
+        self.vit_infer = InferenceOp(
+            self,
+            backend="trt",
+            model_path_map={"ptychvit": "/models/ptycho_vit_amp_phase_b64.engine"},
+            pre_processor_map={"ptychvit": ["input"]},
+            inference_map={"ptychvit": ["output"]},
+            device_map={"ptychvit": "1"},
+            is_engine_path=True,
+            input_on_cuda=False,
+            output_on_cuda=False,
+            name="vit_infer",
+        )
+        self.vit_save = VitSaveOp(self, name="vit_save")
 
         self.add_flow(self.eiger_zmq_rx,self.eiger_decompress,{("image_index_encoding","image_index_encoding")})
         self.add_flow(self.eiger_decompress,self.image_batch,{("decompressed_image","image"),("image_index","image_index")})
@@ -490,8 +513,10 @@ class PtychoApp(Application):
         self.add_flow(self.pty,self.o,{("output","output")})
 
         # VIT: branch off ImagePreprocessorOp's diff_amp (fan-out, parallel to image_send)
-        self.add_flow(self.image_proc, self.vit, {("diff_amp", "diff_amp"), ("image_indices", "image_indices")})
-        self.add_flow(self.vit, self.vit_save, {("vit_result", "results")})
+        self.add_flow(self.image_proc, self.vit_pre, {("diff_amp", "diff_amp"), ("image_indices", "image_indices")})
+        self.add_flow(self.vit_pre,   self.vit_infer, {("preprocessed", "receivers")})
+        self.add_flow(self.vit_pre,   self.vit_save,  {("metadata", "metadata")})
+        self.add_flow(self.vit_infer, self.vit_save,  {("transmitter", "infer_output")})
 
 
 def main():
